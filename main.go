@@ -5,11 +5,13 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/google/uuid"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -23,13 +25,18 @@ const (
 var (
 	listenAddr string
 	healthy    int32
+	debug      bool
+	file       string
 )
 
 func main() {
 	flag.StringVar(&listenAddr, "listen-addr", ":5000", "server listen address")
+	flag.StringVar(&file, "file", "padt_response_file.xml", "The file to read")
+	flag.BoolVar(&debug, "debug", false, "Include logging of request details")
 	flag.Parse()
 
 	logger := log.New(os.Stdout, "http: ", log.LstdFlags)
+	logger.Printf("Serving file %s\n", file)
 	logger.Println("Server is starting...")
 
 	router := http.NewServeMux()
@@ -88,7 +95,7 @@ func index() http.Handler {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "Hello, World!")
+		fmt.Fprintln(w, "use /padt as the URL to POST to")
 	})
 }
 
@@ -103,16 +110,34 @@ func healthz() http.Handler {
 }
 
 func sendPadtResponse() http.Handler {
+	filePath := file
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		file, err := ioutil.ReadFile("padt_response.xml")
+		file, err := ioutil.ReadFile(file)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprintln(w, "Unable to read padt_response_file.xml")
+			fmt.Fprintf(w, "Unable to read %s\n", filePath)
 			return
 		}
 
+		if debug {
+			fmt.Fprintln(os.Stdout, "--------------")
+			for k, v := range r.Header {
+				fmt.Fprintf(os.Stdout, "%q: %q\n", k, v)
+			}
+			body, _ := ioutil.ReadAll(r.Body)
+			fmt.Fprintf(os.Stdout, string(body))
+			fmt.Fprintln(os.Stdout, "--------------")
+		}
+
+		fileContent := string(file)
+
+		partyId, err := uuid.NewRandom()
+		if err == nil {
+			fileContent = strings.ReplaceAll(fileContent, "${PartyID}", partyId.String())
+		}
+
 		w.Header().Set("Content-Type", "application/xml")
-		w.Write(file)
+		w.Write([]byte(fileContent))
 	})
 }
 
@@ -128,7 +153,7 @@ func logging(logger *log.Logger) func(http.Handler) http.Handler {
 
 				buf := new(bytes.Buffer)
 				bytesRead, err := buf.ReadFrom(r.Body)
-				if err == nil  && bytesRead > 0 {
+				if err == nil && bytesRead > 0 {
 					logger.Println("-----------------")
 					logger.Println(buf.String())
 					logger.Println("-----------------")
