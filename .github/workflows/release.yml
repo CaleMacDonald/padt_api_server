@@ -1,5 +1,4 @@
-- name: Create Release
-  uses: goreleaser/goreleaser-action@v2.7.0
+name: Create Release
 
 on:
   push:
